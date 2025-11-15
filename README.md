@@ -12,10 +12,12 @@ This is an educational project developed with the main goal of providing a pract
     - [Creating a new database and defining tables on SQL](#creating-a-new-database-and-defining-tables-on-sql)
     - [Populating the database tables with data](#populating-the-database-tables-with-data)
     - [Defining Stored Procedures for database](#defining-stored-procedures-for-database)
+    - [Unit Tests](#unit-tests)
+    - [SQL Triggers](#sql-triggers)
+
+- [Data Access Layer](#data-access-layer-dal)
 
 - [References and Tutorials](#references-and-tutorials)
-
-    - [PostgreSQL manual, references and tutorials](#postgresql-manual-references-and-tutorials)
 
 ## Motivation
 
@@ -262,27 +264,242 @@ Sample data loaded successfully.;
 
 For dealing with transactions (transfer money), adding new customers we can rely on Stored Procedures, which are prepared SQL code that can be saved. The code can be reused over and over again. So instead of having an SQL query that we must write over and over again, we can simply save it as a stored procedure, then just call it to be executed when needed.
 
-Let's create a procedure called `moneyTransfer.sql` to safely transfer money between accounts. A function that transfers money between two accounts, in simplest form possible, needs the source account (where the money comes from) and a target account (where the money goes to), it also needs the amount of money being transfered and an optional description for the receiving account. We can begin creating a function with `CREATE FUNCTION function_name` SQL command (**Note:** Adding the `OR REPLACE` command to either CREATE or REPLACE an existing function with the same name)
+Let's create a procedure called `moneyTransfer.sql` to safely transfer money between accounts. A function that transfers money between two accounts, in simplest form possible, needs the source account (where the money comes from) and a target account (where the money goes to), it also needs the amount of money being transfered and an optional description for the receiving account. We can begin creating a function with `CREATE FUNCTION function_name` SQL command (**Note:** Adding the `OR REPLACE` command to either CREATE or REPLACE an existing function with the same name). For more information about creating functions in PostgreSQL [click here](https://www.postgresql.org/docs/current/sql-createfunction.html). This function receives the following as parameters:
 
 ```sql
-CREATE OR REPLACE FUNCTION transfer_funds(
+CREATE OR REPLACE FUNCTION transferMoney(
+    /* from account - source account */
     transf_from_account INT,
+    /* destination account */
     transf_to_account   INT,
+    /* Amount to be transfered */
     transf_amount       NUMERIC(12,2),
+    /* Optional Details on the transfer */
     transf_description  TEXT DEFAULT 'Transfer'
 )
 ```
+
+We know this function will work in the following way:
+
+1. First it must check if the transfer amount entered is valid (greater than zero). A simple check can be done by:
+
+```sql
+-- Validate the amount set up by transaction
+IF transf_amount <= 0 THEN
+    RAISE EXCEPTION 'Transfer amount must be positive';
+END IF;
+```
+
+2. It must lock both accounts in a way that no other transaction can modify these accounts while the transfer is running, because it could led to duplicated transfers, or the money being received for the destination account but never leaving the source one, and vice versa.
+
+```sql
+-- Lock source account row
+SELECT balance, currency
+INTO ver_from_balance, ver_from_currency
+FROM accounts
+WHERE account_id = transf_from_account
+FOR UPDATE;
+
+-- Lock destination account row
+SELECT currency
+INTO ver_to_currency
+FROM accounts
+WHERE account_id = transf_to_account
+FOR UPDATE;
+```
+
+3. It must check if the accounts exist, otherwise it can led to unpredictable behaviors such as the money leaving the source account and arriving nowhere, or vice versa.
+
+```sql
+IF v_from_currency IS NULL THEN
+    RAISE EXCEPTION 'Source account % does not exist', p_from_account;
+END IF;
+```
+
+4. Checks if the amount is valid, if the source account has sufficent funds for transfer.
+
+```sql
+IF ver_from_balance < transf_amount THEN
+    RAISE EXCEPTION
+        'Insufficient funds in account %, balance: %, attempted: %',
+        transf_from_account, ver_from_balance, transf_amount;
+END IF;
+```
+
+5. Update the balances for each account simultaneously to ensure that if an error happens after the first update, PostgreSQL will automatically roll back all changes, preventing partial transfers for instance.
+
+```sql
+UPDATE accounts
+SET balance = balance - transf_amount
+WHERE account_id = transf_from_account;
+
+UPDATE accounts
+SET balance = balance + transf_amount
+WHERE account_id = transf_to_account;
+```
+
+6. Record the transaction for audit records such as: tracing the money, financial reports and etc.
+
+```sql
+INSERT INTO transactions (from_account, to_account, amount, description)
+VALUES (transf_from_account, transf_to_account, transf_amount, transf_description);
+```
+
+The function is deployed at [`transferMoney)`](/database/procedures/transferMoney.sql). Now that we wrote our SQL script to transfer money, we can add this stored procedure for the database with
+
+```bash
+psql -U postgres -d database1 -f database/procedures/transferMoney.sql
+```
+
+And calling it inside the database to transfer money from one account that has insufficient funds:
+
+```bash
+database1=# SELECT transferMoney(6, 12, 30.00, 'Fridge repair service');
+
+ERROR:  Insufficient funds in account 6, balance: 9.66, attempted: 30.00
+CONTEXT:  PL/pgSQL function transfermoney(integer,integer,numeric,text) line 45 at RAISE
+```
+
+But how can we be sure this function is working as expected before we can safely deploy it to the Production Environment?
+
+### Unit Tests
+
+We can perform unit tests to ensure that a function is working as expected, testing every possible case with different scenarios and inputs to see its behaviour and validate if it's ready to be deployed on production or not.
+
+**Note that** unit testing is an important subject that won't be developed further in this project documentation. But a small one will be deployed for this function using pgTAP (Test Anything Protocol), which is the standard framework for PostgreSQL unit tests. [Click here](https://pgtap.org/documentation.html) for the documentation.
+
+I'll be following the same principles learned from MIT 6.0001 Introduction to Computer Science on these tests, testing every scenario for my function.
+
+We need to enable pgTAP extension on our database with `CREATE EXTENSION pgtap;`.
+
+After adding the test to [test_transferMoney.sql](/database/tests/test_transferMoney.sql) we can run this test on our database with the following command:
+
+```sh
+$ psql -U postgres -d database1 -f tests/test_transferMoney.sql
+
+# --- Results of running test on DB ---
+    ok 1 - Transfer between accounts 1 and 2 should succeed
+    ok 2 - Account 1 should have 70.00
+    ok 3 - Account 2 should have 80.00
+    ok 4 - Should throw on insufficient balance
+    ok 5 - Account 2 balance unchanged after failed transfer
+    ok 6 - Should throw on negative transfer amount
+    ok 7 - Should throw when accounts have different currencies
+    ok 8 - Transaction should be recorded
+    ok 9 - Should throw on non-existing source account
+    ok 10 - Should throw on non-existing destination account
+```
+
+In the simplest way possible, these test's results indicate that our function is ready to be deployed on a production database. Of course on a real scenario the tests are not as simple as the one we ran, but it's a good way to see how a unit test might look like on a system.
+
+### SQL Triggers
+
+SQL triggers are stored procedures that automatically execute in response to certain events (that can trigger it) in a database. As they add an extra layer of protection to our database, they can be used to enforce business rules, security on the database by preventing illegal changes (preventing direct changes on a user balance for instance).
+
+We want to implement triggers for the bank that ensures only stored procedures can change data on the database (changing money, changing user definitions), also noo one can rewrite transaction history to keep the data integrity.
+
+The syntax rule for defining triggers is pretty straightforward ([click here](https://www.postgresql.org/docs/current/sql-createtrigger.html) for more details on writting them), let's implement a trigger to prevent updates of account balance, only `transferMoney()` function is allowed to do it.
+
+```sql
+CREATE OR REPLACE FUNCTION prevent_direct_balance_update()
+RETURNS trigger AS $$
+BEGIN
+    -- Reject if balance changes outside allowed paths
+    IF TG_OP = 'UPDATE' AND OLD.balance <> NEW.balance THEN
+        RAISE EXCEPTION
+            'Direct balance updates are not allowed. Use transferMoney() instead.';
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_prevent_direct_balance_update
+BEFORE UPDATE OF balance ON accounts
+FOR EACH ROW
+EXECUTE FUNCTION prevent_direct_balance_update();
+```
+
+After loading the `triggers.sql` on our database and trying to directly modify an account value:
+
+```bash
+database1=# UPDATE accounts
+database1-# SET balance = 50.00
+database1-# WHERE account_id = 5;
+ERROR:  Direct balance updates are not allowed. Use transferMoney() instead.
+CONTEXT:  PL/pgSQL function prevent_direct_balance_update() line 5 at RAISE
+```
+
+**Triggers for protecting transactions of being changed**
+
+Another very important trigger that needs to be set up is to protect transaction table, they must be immutable. Only new transactions can be added up, but existing ones cannot be `UPDATE` or `DELETE`. We can achieve this by setting up a trigger on both commands such as:
+
+
+```sql
+CREATE OR REPLACE FUNCTION prevent_transaction_modifications()
+RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION
+        'Transactions cannot be modified or deleted!';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_no_update_transactions
+BEFORE UPDATE ON transactions
+FOR EACH ROW
+EXECUTE FUNCTION prevent_transaction_modifications();
+
+CREATE TRIGGER trg_no_delete_transactions
+BEFORE DELETE ON transactions
+FOR EACH ROW
+EXECUTE FUNCTION prevent_transaction_modifications();
+```
+
+When trying to delete or modify the `transaction` table, an error is raised:
+
+```sh
+database1=# DELETE FROM transactions WHERE transaction_id = 23;
+ERROR:  Transactions cannot be modified or deleted. They are immutable.
+CONTEXT:  PL/pgSQL function prevent_transaction_modifications() line 3 at RAISE
+```
+
+Some other triggers can be set up to deal with deletion of accounts that have pending transactions for instance, which will prevent an account to be deleted when unfinished transaction is associated to it, or deleting an account in which the balance is different of zero.
+
+Now that our database is functional from a study perspective, we can step up a layer from the low level data storage and start thinking about designing a way for users to perform CRUD (**C**reate, **R**ead, **U**pdate and **D**elete) operations on the database. On the next topic we can start thinking about the Data Access Layer.
+
+## Data Access Layer (DAL)
+
+Data Access Layer (or DAL) is a layer of a computer program which provides simplified access to database. So instead of using commands such as `INSERT`, `DELETE`, and `UPDATE` directly into PostgreSQL, we can set up a class and a few stored procedures into the database. These procedures will be called from a method inside the class, and this class will return an object containing the requested values. This will allow the client modules (or user) to be created with a higher level of abstraction.
+
+And of course, we are talking about classes, which basically means `Oriented Object Programming`. Here most enterprises would decide to implement their Data Access Layer in Java due to its platform independence and extensive ecosystem of open-source frameworks (which are a set of libraries and/or tools that provide a structure for building applications) that simplify database interactions. 
 
 ## References and Tutorials
 
 All the materials consulted for building up this project include documentations, posts, foruns, blogs and videos. Some of them are:
 
-### PostgreSQL manual, references and tutorials
+**PostgreSQL manual, references and tutorials**
 
-[PostgreSQL main page](https://www.postgresql.org/)
+- [PostgreSQL main page](https://www.postgresql.org/)
 
-[Basic SQL syntax and other fundamental operations](https://neon.com/postgresql/tutorial)
+- [Basic SQL syntax and other fundamental operations](https://neon.com/postgresql/tutorial)
 
-[`initdb` - Creating a new PostgreSQL database cluster](https://www.postgresql.org/docs/current/app-initdb.html)
+- [`initdb` - Creating a new PostgreSQL database cluster](https://www.postgresql.org/docs/current/app-initdb.html)
 
-[Stored Procedures](https://www.geeksforgeeks.org/postgresql/postgresql-introduction-to-stored-procedures/)
+- [Stored Procedures](https://www.geeksforgeeks.org/postgresql/postgresql-introduction-to-stored-procedures/)
+
+- [pgTAB - PostgreSQL unit testing framework](https://pgtap.org/documentation.html)
+
+- [SQL Triggers](https://www.datacamp.com/tutorial/sql-triggers)
+
+**Data Access Layer**
+
+- [What is Data Access Layer](https://en.wikipedia.org/wiki/Data_access_layer)
+
+- A helpful article on writting Data Access Layer on Medium:
+
+- [Part 1](https://medium.com/swlh/designing-a-data-access-layer-part-1-f10068408e60)
+
+- [Part 2](https://medium.com/swlh/designing-a-data-access-layer-part-2-3c9fa905f1ed)
+
+- [Part 3](https://medium.com/swlh/designing-data-access-layer-part-3-ffe0f17198e6)
+

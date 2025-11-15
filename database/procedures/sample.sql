@@ -91,7 +91,7 @@ VALUES
 
 INSERT INTO transactions (from_account, to_account, amount, description)
 VALUES
--- Random but "realist" transfers with description
+-- Random but "realistic" transfers with description
 (1, 3, 50.00, 'Dinner split'),
 (2, 1, 120.00, 'Loan repayment'),
 (5, 8, 200.00, 'Gift'),
@@ -103,7 +103,7 @@ VALUES
 (18, 19, 45.22, 'Food delivery'),
 (20, 8, 500.00, 'Invoice settlement'),
 
--- Add 110 misc random transactions
+-- Add 10 misc random transactions
 (3, 4, 20.00, 'Misc'),
 (4, 2, 18.50, 'Misc'),
 (6, 7, 11.11, 'Misc'),

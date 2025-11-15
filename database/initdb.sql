@@ -12,6 +12,13 @@ CREATE DATABASE database1;
 
 \c database1;
 
+/* If the tables exist, delete (drop) */
+
+DROP TABLE IF EXISTS transactions CASCADE;
+DROP TABLE IF EXISTS accounts CASCADE;
+DROP TABLE IF EXISTS customers CASCADE;
+DROP TABLE IF EXISTS audit_logs CASCADE;
+
 -- Creating the base tables with references
 
 CREATE TABLE customers (
@@ -37,6 +44,9 @@ CREATE TABLE accounts (
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE INDEX idx_accounts_customer
+    ON accounts(customer_id);
+
 CREATE TABLE transactions (
     transaction_id  SERIAL PRIMARY KEY,
     from_account    INT REFERENCES accounts(account_id),
@@ -47,22 +57,51 @@ CREATE TABLE transactions (
     status          VARCHAR(20) DEFAULT 'completed'
 );
 
-/* Useful indexes */
 CREATE INDEX idx_transactions_timestamp
     ON transactions(timestamp);
 
-CREATE INDEX idx_accounts_customer
-    ON accounts(customer_id);
+-- These logs are going to be useful for audit purposes
+
+CREATE TABLE audit_logs (
+    log_id          SERIAL PRIMARY KEY,
+    log_timestamp   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    operation       VARCHAR(100),
+    details         TEXT
+);
 
 /* Some sql stored procedures to be used includes
 
 transfer funds from one account to another
-sample data which will populate the database */
+sample data which will populate the database
+some triggers to add extra security layer */
 
-/* Work in progress...
-\echo 'Loading transfer procedure...'
-\i database/procedures/transferMoney.sql */
-
--- Loading sample data to populate the database
 \echo 'Loading sample data...'
 \i database/procedures/sample.sql
+
+\echo 'Loading transfer procedure...'
+\i database/procedures/transferMoney.sql
+
+\echo 'Loading triggers...'
+\i database/procedures/triggers.sql
+
+-- Reporting tools
+
+CREATE OR REPLACE VIEW daily_transactions_view AS
+SELECT
+    transaction_id,
+    from_account,
+    to_account,
+    amount,
+    description,
+    timestamp::date AS day
+FROM transactions;
+
+CREATE OR REPLACE VIEW customer_account_summary AS
+SELECT
+    c.customer_id,
+    c.full_name,
+    COUNT(a.account_id) AS num_accounts,
+    SUM(a.balance) AS total_balance
+FROM customers c
+LEFT JOIN accounts a ON c.customer_id = a.customer_id
+GROUP BY c.customer_id, c.full_name;
