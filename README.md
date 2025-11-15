@@ -16,6 +16,10 @@ This is an educational project developed with the main goal of providing a pract
     - [SQL Triggers](#sql-triggers)
 
 - [Data Access Layer](#data-access-layer-dal)
+    - [Installing and Using `libpqxx`](#installing-and-using-libpqxx)
+    - [Database Connection Interface](#database-connection-interface)
+        - [db_connection module](#db_connection-module)
+            - [Linking, Compiling and test module](#linking-compiling-and-testing-db_connection)
 
 - [References and Tutorials](#references-and-tutorials)
 
@@ -471,7 +475,224 @@ Now that our database is functional from a study perspective, we can step up a l
 
 Data Access Layer (or DAL) is a layer of a computer program which provides simplified access to database. So instead of using commands such as `INSERT`, `DELETE`, and `UPDATE` directly into PostgreSQL, we can set up a class and a few stored procedures into the database. These procedures will be called from a method inside the class, and this class will return an object containing the requested values. This will allow the client modules (or user) to be created with a higher level of abstraction.
 
-And of course, we are talking about classes, which basically means `Oriented Object Programming`. Here most enterprises would decide to implement their Data Access Layer in Java due to its platform independence and extensive ecosystem of open-source frameworks (which are a set of libraries and/or tools that provide a structure for building applications) that simplify database interactions. 
+And of course, we are talking about classes, which basically means `Oriented Object Programming`. Here most enterprises would decide to implement their Data Access Layer in Java due to its platform independence and extensive ecosystem of open-source frameworks (which are a set of libraries and/or tools that provide a structure for building applications) that simplify database interactions.
+
+I've decided to write the DAL using C++ for convenience. For this task PostgreSQL has a good API [`libpqxx`](https://libpqxx.readthedocs.io/stable/index.html ) which provides a set of classes that allow client programs to connect to the PostgreSQL: database class and large object class.
+
+### Installing and Using `libpqxx`
+
+`libpqxx` can be easily installed by just:
+
+```bash
+$ git clone https://github.com/jtv/libpqxx.git && cd libpqxx
+
+$ ./configure --disable-shared
+
+$ make
+
+$ sudo make install
+```
+
+Running a sample C++ program to test the connection with the PostgreSQL database using `libpqxx`. It connects to the default database (victor), queries it for a very simple result, converts it to an int, and prints it out. It also contains some basic error handling. (Example taken from [here](https://libpqxx.readthedocs.io/stable/getting-started.html))
+
+```cpp
+#include <iostream>
+#include <pqxx/pqxx>
+ 
+int main() {
+    try {
+        // Connect to the database.  In practice we may have to pass some
+        // arguments to say where the database server is, and so on.
+        // The constructor parses options exactly like libpq's
+        // PQconnectdb/PQconnect, see:
+        // https://www.postgresql.org/docs/10/static/libpq-connect.html
+        pqxx::connection cx;
+    
+        // Start a transaction.  In libpqxx, you always work in one.
+        pqxx::work tx(cx);
+    
+        // work::exec1() executes a query returning a single row of data.
+        // We'll just ask the database to return the number 1 to us.
+        pqxx::row r = tx.exec1("SELECT 1");
+    
+        // Commit your transaction.  If an exception occurred before this
+        // point, execution will have left the block, and the transaction will
+        // have been destroyed along the way.  In that case, the failed
+        // transaction would implicitly abort instead of getting to this point.
+        tx.commit();
+    
+        // Look at the first and only field in the row, parse it as an integer,
+        // and print it.
+        //
+        // "r[0]" returns the first field, which has an "as<...>()" member
+        // function template to convert its contents from their string format
+        // to a type of your choice.
+        std::cout << r[0].as<int>() << " - Hello PostgreSQL :)" << std::endl;
+    }
+    catch (std::exception const &e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
+}
+```
+
+To link the final program using `libpqxx`, we need to ensure linking to both the C-level `libpq` library and `libpqxx`. With most Unix style compilers: `-lpqxx -lpq`. I'm using `g++`, then I'll compile [`hello.cpp`](/core/hello.cpp) with:
+
+> g++ hello.cpp -o hello -lpqxx -lpq
+
+Running it for the first time to check the connection to the database:
+
+```bash
+$ ./hello
+
+1 - Hello PostgreSQL :)
+```
+
+We have successfully installed, configured `libpqxx` and executed a simple program to perform a "handshake" with the database. We now know how to connect to the database, query a simple result and returns to the client.
+
+Now we can finally move forward with the Data Access Layer implementation and define some modules. The first one we need is to connect to the database itself.
+
+### Database Connection Interface
+
+As the name suggests, this module will be responsible to connect to the database itself and it will have the following structure. It will be a class that loads the database credentials (for security reasons) to access the database, it opens a connection using `libqxx`, this class will provide some basic methods for accessing data from database.
+
+The database credentials will be stored in a JSON file for the sake of convenience on this project, but of course in a real project the credentials would be stored in a much safer place like an LDAP server (Lightweight Directory Access Protocol).
+
+The default PostgreSQL port is 5432, we connect to our default database `database1` with the user `postgres` and wait only 5 seconds before a timeout. SSL mode disabled since we're only running it locally:
+
+```json
+{
+    "host": "localhost",
+    "port": 5432,
+    "dbname": "database1",
+    "user": "postgres",
+    "password": "",
+    "sslmode": "disable",
+    "connect_timeout": 5
+}
+```
+
+We can use the library [`nlohmann/json`](https://github.com/nlohmann/json) to be able to work with C++ with .json files. To install the library, simply download the single `json.hpp` file into `/include/` directory and include it:
+
+```cpp
+#include "json.hpp"
+
+// for convenience
+using json = nlohmann::json;
+```
+
+Now let's proceed to build up the database_connection module.
+
+#### db_connection module
+
+This module will have a foundation Data Access Layer class called `DBConnection`. This class will be responsible to abstract the connection with PostgreSQL connection using `libpqxx`. We will also be using the .json file to store the credentials to access the db to be used within this class. Let's create this class as a `singleton class` (classes that can be instantiated once, and can be accessed globally). By ensuring this single instance can be shared throughout our application, which will make it great for managing the global state of our application.
+
+A singleton pattern is an important choice in applications where the database connection represents a shared global resource. Opening and closing connections repeatedly is slow and it can also lead to concurrency problems. By ensuring a single shared instance, we guarantee that every part of the system interacts within the same session improving performance and safety.
+
+The class definition that implements these ideas will have the following template:
+
+```cpp
+/**
+ * @class db_connection
+ *
+ * @brief This Singleton class is responsible for abstracting some functionalities like
+ * loading database configuration, managing a PostgreSQL connection (thru libpqxx), 
+ * and also creating some transactions.
+ *
+ * This class acts as the foundation of the Data Access Layer (DAL).
+ * It loads database parameters from a JSON configuration file, builds
+ * a connection string, and initializes a single libpqxx connection shared
+ * across the entire application.
+ *
+ */
+class DBConnection {
+public:
+    /**
+     * @brief Retrieve the unique (global) singleton instance of 
+     * the database connection.
+     *
+     * Ensures that only a single database connection exists in the program.
+     * All DAL services must call this function to access the shared connection.
+     *
+     * @return A reference to the singleton db_connection instance.
+     */
+    static DBConnection& getInstance();
+```
+
+PostgreSQL uses a connection string to set up the DB session via `libpqxx`. The class builds this string dynamically from the JSON fields, allowing maximum flexibility. The string is passed to `pqxx::connection` that authenticates and is responsible for session initialization.
+
+> String example: host=localhost port=5432 dbname=database1 user=postgres password= sslmode=disable connect_timeout=5
+
+Also of exposing low level PostgreSQL query mechanisms (like our stored procedures), the class provides two functions for transactions:
+
+- Write transaction (`pqxx::work`)
+Used for modifying data: `INSERT`, `UPDATE`, `DELETE`.
+
+- Read transaction (`pqxx::read_transaction`)
+Used for `SELECT`-only operations, enforcing read-only safety.
+
+These methods encapsulate the CRUD methods, ensuring the caller always uses the right connection and reduces the chance of incorrect transaction handling (like an unauthorized user performs an INSERT operation).
+
+We've written the following public functions for operations:
+
+`loadConfig(path)` - Load database credential and config parms from a JSON file
+
+`connect()` - Stabilish a connection to the database
+
+`isConnected()` - Checks if the database connection is currently open
+
+`createWriteTransaction()` -for INSERT, UPDATE, DELETE operations
+
+`createReadTransaction()` - for SELECT queries
+
+##### Linking, Compiling and testing `db_connection`
+
+A small makefile can be written to easily link and compile all the `.cpp` and `.hpp` files as our project grows. A small demo function based on the example from [hello.cpp](/core/hello.cpp) (from `libpqxx` documentation) was adapted to test the `db_connection` and perform a basic readTransaction() queries in the following format:
+
+```cpp
+/* Try to query a customer list */
+std::cout << "\n-- Testing a query. Return some details of customer_id = 2 --" << std::endl;
+pqxx::result cust = tx->exec("SELECT * FROM customers WHERE customer_id = 2;");
+pqxx::row row_customer = cust.one_row();
+
+std::string custName = row_customer[1].as<std::string>();
+std::string custEmail = row_customer[2].as<std::string>();
+std::string custPhone = row_customer[3].as<std::string>();
+std::string custAddress = row_customer[5].as<std::string>();
+
+std::cout << "Customer Name: " << custName << std::endl;
+std::cout << "Customer Email: " << custEmail << std::endl;
+std::cout << "Customer Phone: " << custPhone << std::endl;
+std::cout << "Customer Address: " << custAddress << std::endl;
+/* It's working */
+```
+
+To compile this module and the test function we simply run `make` from the [core](/core/) directory. After compiling it will generate an executable file located in `build/bin` that can be executed:
+
+```sh
+$ ./build/bin/db_connection_demo
+Loading credential from JSON file...
+Connecting to PostgreSQL...
+Connected to PostgreSQL!
+Running test query...
+
+Connected to database: database1
+Current server time: 2025-11-15 20:02:55.78574+01
+
+-- Testing a query. Return some details of customer_id = 2 --
+Customer Name: Benjamin Carter
+Customer Email: ben.c@bank1.com
+Customer Phone: 555-2020
+Customer Address: 42 Oak Road
+```
+
+And we can successfully connect to the database thru the credentials in the JSON file, perform a simple "handshake" to tell us which database we are connect, and we execute a query on the database itself. But of course this single demonstration is not a proof that our module is ready to go to production. Remember that whenever a new function is developed, intense tests must be done do ensure the quality of that feature before it's safer to go to production.
+
+# TODO - write some test suits for this module
+
+Some tests can be implemented for this new function. For that we can make good use of Google Test, which is a framework for testing. It's a well documented framework and quite simple to design tests with. For more details on this framework: [GoogleTest Documentation](https://google.github.io/googletest/)
+
+For the next step, we can start thinking about how to effectively use this connection (instead of writing raw queries like we did in the test example above). What is suggested is an API that thru the DBConnection, make these queries in a nice way.
 
 ## References and Tutorials
 
@@ -503,3 +724,12 @@ All the materials consulted for building up this project include documentations,
 
 - [Part 3](https://medium.com/swlh/designing-data-access-layer-part-3-ffe0f17198e6)
 
+- [`libpqxx` building process](https://github.com/jtv/libpqxx/blob/master/BUILDING-configure.md)
+
+- [JSON for modern C++](https://github.com/nlohmann/json)
+
+- [What is a Singleton Class?](https://refactoring.guru/design-patterns/singleton)
+
+- [Singleton Pattern](https://www.patterns.dev/vanilla/singleton-pattern/)
+
+- [Accessing data using libpqxx](https://libpqxx.readthedocs.io/stable/accessing-results.html)
