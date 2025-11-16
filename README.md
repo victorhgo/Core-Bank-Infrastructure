@@ -5,6 +5,7 @@ by Victor Correa
 This is an educational project developed with the main goal of providing a practical environment for learning and applying key concepts related to relational database design such as implementation, maintenance within the context of a simplified banking infrastructure system. Its targeted to be a complete, reproducible study environment where different layers of a financial application can be implemented and tested.
 
 - [Motivation](#motivation)
+
 - [Database](#database)
 
     - [Installing and Initializing PostgreSQL on ArchLinux](#installing-and-initializing-postgresql-on-archlinux)
@@ -20,14 +21,18 @@ This is an educational project developed with the main goal of providing a pract
     - [Database Connection Interface](#database-connection-interface)
         - [db_connection module](#db_connection-module)
             - [Linking, Compiling and test module](#linking-compiling-and-testing-db_connection)
+        - [Account Service Module](#account-service-module)
+
+- [Appendix](#appendix)
+    - [GoogleTest Framework](#appendix-1---googletest-framework)
 
 - [References and Tutorials](#references-and-tutorials)
 
 ## Motivation
 
-Since the beginning of my career as a System Administrator, I have been deeply interested in understanding how large and complex infrastructures such as a core bank operates "under the hood". But working on these environments with high security and operational restrictions we have a very limited or no visibility at all into production databases, also a restricted access to stored procedure such as maintenance routine and reporting scripts, and the opportunity to modify or analyze systems at a foundational level is almost non-existant.
+Since the beginning of my career as a z/OS System Administrator, I have been deeply interested in a better understanding how large and complex infrastructures such as a core bank operates "under the hood". But working on these environments with high security and operational restrictions we have a very limited or no visibility at all into production databases, also a restricted access to stored procedure such as maintenance routines and reporting scripts, and the opportunity to modify or analyze systems at a foundational level is almost non existant.
 
-Specially when it comes to banks, many critical components such as scripts, integration points, or business rules are already well established, and modifying them is an almost impossible process. This makes it quite challenging to clearly understand why things were build the way they were, how individual components interact with each other (for instance, how the Finance Team gets a report from all the transactions executed on a day from the database perspective?) or what the complete data flow looks like (what happens when a customer sends money to another one? What scripts and routines are involved in this process?). The architecture looks really "blurry" from the perspective of a beginning system administrator, leaving important details and questions burried.
+Specially when it comes to banks, many critical components such as scripts, integration points, or business rules are already well established, and modifying them is an almost impossible process. This makes it quite challenging to clearly understand why things were build the way they were, how individual components interact with each other (for instance, how the Finance Team gets a report from all the transactions executed on a day from the database perspective?) or what the complete data flow looks like (what happens when a customer sends money to another one? What scripts and routines are involved in this process?). The architecture looks really "blurry" from the perspective of a beginning system administrator, leaving important details and questions really cloudy.
 
 So I came up with this project idea, where I can build up a simple but working core infrastructure from scratch, in a controlled and unrestricted environment. Where I will be able to explore the database architecture with no restrictions, experiment some ideas and see what happens. I believe this will help me obtain a deeper understanding of how these applications work under the hood, integrating multiple languages and methods on a "realistic scenario".
 
@@ -688,11 +693,110 @@ Customer Address: 42 Oak Road
 
 And we can successfully connect to the database thru the credentials in the JSON file, perform a simple "handshake" to tell us which database we are connect, and we execute a query on the database itself. But of course this single demonstration is not a proof that our module is ready to go to production. Remember that whenever a new function is developed, intense tests must be done do ensure the quality of that feature before it's safer to go to production.
 
-# TODO - write some test suits for this module
+Some tests can be implemented for this new function. For that we can make good use of Google Test, which is a framework for testing. It's a well documented framework and quite simple to design tests with. For more details on this framework: [GoogleTest Documentation](https://google.github.io/googletest/) and the [appendix](#appendix-1---googletest-framework). Running a simple test on the new implemented db_connection module with `make test` command:
 
-Some tests can be implemented for this new function. For that we can make good use of Google Test, which is a framework for testing. It's a well documented framework and quite simple to design tests with. For more details on this framework: [GoogleTest Documentation](https://google.github.io/googletest/)
+```sh
+$ make test
 
-For the next step, we can start thinking about how to effectively use this connection (instead of writing raw queries like we did in the test example above). What is suggested is an API that thru the DBConnection, make these queries in a nice way.
+Running main() from /usr/src/debug/gtest/googletest-1.17.0/googletest/src/gtest_main.cc
+[==========] Running 5 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 2 tests from DBConnectionFailureTest
+[ RUN      ] DBConnectionFailureTest.ConnectThrowsOnInvalidCredentials
+[       OK ] DBConnectionFailureTest.ConnectThrowsOnInvalidCredentials (2 ms)
+[ RUN      ] DBConnectionFailureTest.LoadConfigThrowsOnInvalidPath
+[       OK ] DBConnectionFailureTest.LoadConfigThrowsOnInvalidPath (0 ms)
+[----------] 2 tests from DBConnectionFailureTest (2 ms total)
+
+[----------] 3 tests from DBConnectionTest
+[ RUN      ] DBConnectionTest.ConnectsSuccessfully
+[       OK ] DBConnectionTest.ConnectsSuccessfully (2 ms)
+[ RUN      ] DBConnectionTest.CanRunSimpleSelect
+[       OK ] DBConnectionTest.CanRunSimpleSelect (1 ms)
+[ RUN      ] DBConnectionTest.CanFetchSpecificCustomerById
+[       OK ] DBConnectionTest.CanFetchSpecificCustomerById (0 ms)
+[----------] 3 tests from DBConnectionTest (4 ms total)
+
+[----------] Global test environment tear-down
+[==========] 5 tests from 2 test suites ran. (7 ms total)
+[  PASSED  ] 5 tests.
+```
+
+Since all tests passed, we are safely to assume that we're ready for the next stage of the project. For the next step, we can start thinking about how to effectively use this connection (instead of writing raw queries like we did in the test example above). What is suggested is an API that thru the DBConnection, make these queries in a nice way.
+
+#### Account Service module
+
+Since we want to start using a clean C++ API to perform some queries on the database without using the `db_connection` directly, we need to develop a module where we can perform queries on the database like fetch account information (account info by account id, see the balance for this account for instance). We can use the db_connection's `createReadTransaction()` method to perform such operations. It will look like this:
+
+1. Connect to the database using the `db_connection` method.
+
+2. Use a C++ `struct` to parse account information
+
+3. Perform a `SELECT` query using the `createReadTransaction()` method
+
+4. Fetch the account information into the structure then return the data to the user (client)
+
+5. Ends transaction.
+
+We can use a structure like this to fetch the information from the database:
+
+```cpp
+struct Account {
+    int         accountId;
+    int         customerId;
+    std::string accountType;
+    double      balance;
+    std::string currency;
+};
+```
+
+# TODO: Implement the service module following the structure above
+
+## Appendix
+
+### Appendix 1 - GoogleTest Framework
+
+GoogleTest is a C++ framework for writing tests. It has a very extensive and pretty straightforward documentation and it's quite simple to write tests to it. Following the examples on [samples](https://github.com/google/googletest/tree/main/googletest/samples), a small test was deployed in the [/tests/sample](/core/tests/sample/) directory to follow the tutorial on [GoogleTest guide](https://google.github.io/googletest/primer.html). It also teaches how to [build it using CMake](https://google.github.io/googletest/quickstart-cmake.html). All examples were taken from GoogleTest documentation to test how to write and run tests with it.
+
+**Installing GoogleTest framework `gtest` on ArchLinux**
+
+```sh
+$ sudo pacman -S gtest
+```
+
+After installing it, we can build and run the sample test from GoogleTest with CMake:
+
+```sh
+$ cmake -S . -B build
+
+# After build finishs
+
+$ cmake --build build
+
+# To execute the test
+
+$ ctest --test-dir build
+
+Test project /core/tests/sample/build
+    Start 1: FactorialTest.Negative
+1/6 Test #1: FactorialTest.Negative ...........   Passed    0.00 sec
+    Start 2: FactorialTest.Zero
+2/6 Test #2: FactorialTest.Zero ...............   Passed    0.00 sec
+    Start 3: FactorialTest.Positive
+3/6 Test #3: FactorialTest.Positive ...........   Passed    0.00 sec
+    Start 4: IsPrimeTest.Negative
+4/6 Test #4: IsPrimeTest.Negative .............   Passed    0.00 sec
+    Start 5: IsPrimeTest.Trivial
+5/6 Test #5: IsPrimeTest.Trivial ..............   Passed    0.00 sec
+    Start 6: IsPrimeTest.Positive
+6/6 Test #6: IsPrimeTest.Positive .............   Passed    0.00 sec
+
+100% tests passed, 0 tests failed out of 6
+
+Total Test time (real) =   0.02 sec
+```
+
+The framework is successfully working as expected. Now we can design some unit tests.
 
 ## References and Tutorials
 
@@ -733,3 +837,9 @@ All the materials consulted for building up this project include documentations,
 - [Singleton Pattern](https://www.patterns.dev/vanilla/singleton-pattern/)
 
 - [Accessing data using libpqxx](https://libpqxx.readthedocs.io/stable/accessing-results.html)
+
+- [GoogleTest user guide](https://google.github.io/googletest/)
+
+- [GoogleTest simple test](https://google.github.io/googletest/primer.html)
+
+- [GoogleTest samples](https://github.com/google/googletest/tree/main/googletest/samples)
