@@ -1,9 +1,9 @@
 /* Here we will implement some unit tests for DB Connection using
 Google Test framework. Include tests like
 
-- test the failure cases (wrong credential files, non existing credentials)
-- Test the connection
-- Test a simple query like we did on demo */
+    - test the failure cases (wrong credential files, non existing credentials)
+    - Test the connection
+    - Test a simple query like we did on demo */
 #include <gtest/gtest.h>
 #include "database_connection.hpp"
 
@@ -19,9 +19,10 @@ Google Test framework. Include tests like
  */
 class DBConnectionTest : 
 
-    public ::testing::Test {
+public ::testing::Test {
 
     protected:
+
         void SetUp() override {
             // Make sure config is loaded and DB is connected
             auto& db = DBConnection::getInstance();
@@ -114,6 +115,7 @@ TEST_F(DBConnectionTest, CanFetchSpecificCustomerById) {
         2
     );
 
+    /* Commits the transaction */
     tx->commit();
 
     ASSERT_EQ(res.size(), 1u) << "Expected exactly one customer with id = 2";

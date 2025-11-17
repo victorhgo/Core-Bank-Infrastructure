@@ -18,11 +18,11 @@ OBJ_DIR := $(BLD_DIR)/objects
 BIN_DIR := $(BLD_DIR)/bin
 TEST_DIR := tests
 
-CORE_SRC := $(SRC_DIR)/db_connection.cpp
+CORE_SRC := $(SRC_DIR)/db_connection.cpp $(SRC_DIR)/account_service.cpp $(SRC_DIR)/transactions.cpp
 CORE_OBJ := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(CORE_SRC))
 
 # Target executable
-TARGET := $(BIN_DIR)/db_connection_demo
+TARGET := $(BIN_DIR)/account_service_demo
 
 # Source and object files
 SRC := $(wildcard $(SRC_DIR)/*.cpp)
@@ -43,7 +43,6 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp | $(OBJ_DIR)
 # Link object files into final binary
 $(TARGET): $(OBJ) | $(BIN_DIR)
 	$(CXX) -o $@ $^ $(LDFLAGS)
-
 
 # Build tests using GoogleTest
 $(OBJ_DIR)/%.test.o: $(TEST_DIR)/%.cpp | $(OBJ_DIR)

@@ -22,6 +22,8 @@ This is an educational project developed with the main goal of providing a pract
         - [db_connection module](#db_connection-module)
             - [Linking, Compiling and test module](#linking-compiling-and-testing-db_connection)
         - [Account Service Module](#account-service-module)
+        - [Transaction Service Module (transfer money between accounts)](#transaction-service-module-transfer-money-between-accounts)
+            - [A small but annoying issue...](#a-small-but-annoying-issue)
 
 - [Appendix](#appendix)
     - [GoogleTest Framework](#appendix-1---googletest-framework)
@@ -600,26 +602,26 @@ The class definition that implements these ideas will have the following templat
 /**
  * @class db_connection
  *
- * @brief This Singleton class is responsible for abstracting some functionalities like
+ * @brief This class is responsible for abstracting some functionalities like
  * loading database configuration, managing a PostgreSQL connection (thru libpqxx), 
- * and also creating some transactions.
+ * and also performing some basic query transactions
  *
- * This class acts as the foundation of the Data Access Layer (DAL).
+ * This class can be thought as the foundation of the Data Access Layer:
  * It loads database parameters from a JSON configuration file, builds
- * a connection string, and initializes a single libpqxx connection shared
- * across the entire application.
+ * a connection string then initializes a single libpqxx connection shared
+ * across the entire application
  *
  */
 class DBConnection {
 public:
     /**
      * @brief Retrieve the unique (global) singleton instance of 
-     * the database connection.
+     * the database connection
      *
      * Ensures that only a single database connection exists in the program.
      * All DAL services must call this function to access the shared connection.
      *
-     * @return A reference to the singleton db_connection instance.
+     * @return A reference to the singleton db_connection instance
      */
     static DBConnection& getInstance();
 ```
@@ -750,7 +752,362 @@ struct Account {
 };
 ```
 
-# TODO: Implement the service module following the structure above
+Then we can define a class for the `AccountService` to provide high level operations for bank accounts, where we can define the methods to fetch account's info, check if the parsed account exists, get the balance from the account and print information from the account:
+
+```cpp
+/**
+ * @class Service class that provides high level operations for bank accounts 
+ * 
+ * This class will use DBConnection to query the database and exposes a simple
+ *  interface to access data from db.
+ * 
+ */
+class AccountService{
+    public:
+        
+        /**
+         * @brief Get the Account object by unique accountID
+         * 
+         * @param accountID integer, unique account identification 
+         * @return Account struct containing the account data if found,
+         * or std::nullopt if no account exists with the given ID */
+        std::optional<Account> getAccount(int accountID);
+
+        /**
+         * @brief Check if account exists
+         * 
+         * @param accountID integer
+         * @return true if account is found in database
+         * @return false otherwise
+         */
+        bool accountExist(int accountID);
+
+        /**
+         * @brief Get the Account Balance object
+         * 
+         * @param accountID 
+         * @return double as account balance
+         */
+        double getBalance(int accountID);
+
+        /**
+         * @brief Prints account information
+         * 
+         * @param accountID 
+         */
+        void printAccount(int accountID);
+};
+```
+
+The method `getAccount()` will perform a query on the database using the `createReadTransaction()` method with the following structure:
+
+```cpp
+    /* Query account using createReadTransaction() interface */
+    pqxx::result res = tx->exec(
+        "SELECT a.account_id, a.customer_id, c.full_name AS customer_name,"
+        " c.email AS customer_email, a.account_type, a.balance, a.currency "
+        "FROM accounts a JOIN customers c ON a.customer_id = c.customer_id "
+        "WHERE a.account_id = $1", accountID
+    );
+```
+
+If the SQL is successfully done, then we can parse all the fetched data to the `struct Account` that we defined early as:
+
+```cpp    
+const auto& row = res[0];
+
+Account acc{
+    row["account_id"].as<int>(),
+    row["customer_id"].as<int>(),
+    row["customer_name"].as<std::string>(),
+    row["customer_email"].as<std::string>(),
+    row["account_type"].as<std::string>(),
+    row["balance"].as<double>(),
+    row["currency"].as<std::string>()
+};
+```
+
+As done with the `demo_db_connection`, a simple demonstration can be set up to see how the `AccountService` will behave during it's execution, setting it up to connect to the database thru the `db_connection` module:
+
+```cpp
+/* To initialize the connection to db thru DBConnection */
+auto& db = DBConnection::getInstance();
+```
+
+Defining the main function as `main(int argc, char* argv[])` to be able to pass arguments when calling the program will allow us to perform multiple fetches with different account id's. Then we can create an object of type AccountService and use it to perform the queries from the database:
+
+```cpp
+/* Using AccountService to fetch and print account info */
+AccountService service;
+
+/* We can print some information from printAccount() */
+service.printAccount(accountID);
+
+/* Uses the getBalance() module to fetch the account's balance */
+double balance = service.getBalance(accountID);
+std::cout << "\n[INFO] Querying balance for account_id = " << accountID;
+std::cout << "\nBalance: " << balance << "\n";
+```
+
+Compiling and running this demonstration, we can finally use this interface to fetch multiple accounts in this way:
+
+```bash
+# Fetch information from account_id = 11
+$ ./build/bin/account_service_demo 11
+=== AccountService Demonstration ===
+
+[INFO] Loading DB config...
+[INFO] Connecting to PostgreSQL...
+[OK] Connected to database.
+
+[INFO] Querying account_id = 11...
+Account ID:   11
+Customer ID:  6
+Customer Name: Frank Liu
+Customer Email: frank.l@bank1.com
+Type:         checking
+
+[INFO] Querying balance for account_id = 11
+Balance: 710.1
+
+=== Demo finished successfully ===
+
+# Another one, let's get information from account_id = 7
+$ ./build/bin/account_service_demo 7
+=== AccountService Demonstration ===
+
+[INFO] Loading DB config...
+[INFO] Connecting to PostgreSQL...
+[OK] Connected to database.
+
+[INFO] Querying account_id = 7...
+Account ID:   7
+Customer ID:  4
+Customer Name: Daniel Thompson
+Customer Email: dan.t@bank1.com
+Type:         checking
+
+[INFO] Querying balance for account_id = 7
+Balance: 199.99
+
+=== Demo finished successfully ===
+```
+
+And of course, some **integration test** must be implemented to assure the new `AccountService` will work as expected on the production environment. A small one, following the same logics as the test for `db_connection` written to test all the functions and possible scenarios was deployed and running it, produced the following result:
+
+```sh
+Running main() from /usr/src/debug/gtest/googletest-1.17.0/googletest/src/gtest_main.cc
+[==========] Running 13 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 8 tests from AccountServiceTest
+[ RUN      ] AccountServiceTest.GetAccount_ReturnsAccountForExistingId
+[       OK ] AccountServiceTest.GetAccount_ReturnsAccountForExistingId (5 ms)
+[ RUN      ] AccountServiceTest.GetAccount_ReturnsNulloptForNonExistingId
+[       OK ] AccountServiceTest.GetAccount_ReturnsNulloptForNonExistingId (0 ms)
+[ RUN      ] AccountServiceTest.AccountExist_ReturnsTrueForExistingAccount
+[       OK ] AccountServiceTest.AccountExist_ReturnsTrueForExistingAccount (0 ms)
+[ RUN      ] AccountServiceTest.AccountExist_ReturnsFalseForNonExistingAccount
+[       OK ] AccountServiceTest.AccountExist_ReturnsFalseForNonExistingAccount (0 ms)
+[ RUN      ] AccountServiceTest.GetBalance_ReturnsBalanceForExistingAccount
+[       OK ] AccountServiceTest.GetBalance_ReturnsBalanceForExistingAccount (0 ms)
+[ RUN      ] AccountServiceTest.GetBalance_ThrowsForNonExistingAccount
+[       OK ] AccountServiceTest.GetBalance_ThrowsForNonExistingAccount (0 ms)
+[ RUN      ] AccountServiceTest.PrintAccount_DoesNotThrowForExistingAccount
+Account ID:   1
+Customer ID:  1
+Customer Name: Alice Johnson
+Customer Email: alice.j@bank1.com
+Type:         checking
+[       OK ] AccountServiceTest.PrintAccount_DoesNotThrowForExistingAccount (0 ms)
+[ RUN      ] AccountServiceTest.PrintAccount_ThrowsForNonExistingAccount
+[       OK ] AccountServiceTest.PrintAccount_ThrowsForNonExistingAccount (0 ms)
+[----------] 8 tests from AccountServiceTest (7 ms total)
+
+[----------] 2 tests from DBConnectionFailureTest
+[ RUN      ] DBConnectionFailureTest.ConnectThrowsOnInvalidCredentials
+tests/test_db_connection.cpp:46: Skipped
+DB already connected, we cannot test invalid credentials.
+
+[  SKIPPED ] DBConnectionFailureTest.ConnectThrowsOnInvalidCredentials (0 ms)
+[ RUN      ] DBConnectionFailureTest.LoadConfigThrowsOnInvalidPath
+[       OK ] DBConnectionFailureTest.LoadConfigThrowsOnInvalidPath (0 ms)
+[----------] 2 tests from DBConnectionFailureTest (0 ms total)
+
+[----------] 3 tests from DBConnectionTest
+[ RUN      ] DBConnectionTest.ConnectsSuccessfully
+[       OK ] DBConnectionTest.ConnectsSuccessfully (0 ms)
+[ RUN      ] DBConnectionTest.CanRunSimpleSelect
+[       OK ] DBConnectionTest.CanRunSimpleSelect (0 ms)
+[ RUN      ] DBConnectionTest.CanFetchSpecificCustomerById
+[       OK ] DBConnectionTest.CanFetchSpecificCustomerById (0 ms)
+[----------] 3 tests from DBConnectionTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 13 tests from 3 test suites ran. (8 ms total)
+[  PASSED  ] 12 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] DBConnectionFailureTest.ConnectThrowsOnInvalidCredentials
+```
+
+The skipped test is expected because we wrote that when the DB is already connected this test could be skipped/ignored. So our new function is working as expected.
+
+Now that our new module is working as expected, we have a method to perform query on the database. Now we need to define a new method to make INPUT operations on the database itself such as transactions (moving the money from one account to another for instance), modifying account information or creating/deleting users.
+
+#### Transaction Service Module (transfer money between accounts)
+
+Since we have already implemented a SQL stored procedure for transaction [transferMoney.sql](/database/procedures/transferMoney.sql), we can write a simple C++ wrapper around this procedure to have a clean API for money transfers. Since everything related to the validation itself (the constraints such as amount must be positive, sufficient funds on the account, same currency) are already defined in [transferMoney.sql], our API will only orchestrate the transactions.
+
+Like the `AccountService`, we are going to use the `DB_Connection` service to open a transaction using the `createWriteTransaction()` method. Then:
+
+1. Call the `transferMoney.sql` stored procedure. It would look like
+
+```cpp
+exec("SELECT transferMoney($1, $2, $3, $4);",
+    fromAccountID,
+    toAccountID,
+    amount,
+    description;
+);
+```
+
+2. Commits the transaction
+
+We will need to design a service class where we encapsulate the transfer method that throws an exception if any failure reported by the database or by the connection or transaction themselves. Then we call the transferMoney procedure within the `transfer` method that looks like:
+
+```cpp
+class TransactionService{
+    private:
+        void transfer(int fromAccountID,
+                     int toAccountID,
+                     double amount,
+                     const std::string& description = "Transfer description...");
+```
+
+##### A small but annoying issue...
+
+During the transaction service initial implementation test, an issue was found with the SQL triggers and transferMoney procedure. The problem was happening because the trigger and the `transferMoney` procedure were setting the same rule in different definitions. The trigger was written to block any direct update of the `accounts.balance` column and always raised an exception with the message `Direct balance updates are not allowed. Use transferMoney() instead`. This was working fine when I tried to run `UPDATE accounts SET balance = ...` manually for instance, but it was causing a problem for the trigger because it was also catching when `transferMoney()` executed its `UPDATE` statements. PostgreSQL doesn’t allow updates coming from a particular function. The first version of the trigger function:
+
+```sql
+CREATE OR REPLACE FUNCTION prevent_direct_balance_update()
+RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'Direct balance updates are not allowed. Use transferMoney() instead.';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_prevent_direct_balance_update
+BEFORE UPDATE OF balance ON accounts
+FOR EACH ROW
+EXECUTE FUNCTION prevent_direct_balance_update();
+```
+
+At the same time `transferMoney()` implementation did its job: validate the amount and accounts, lock the rows, and then update balances directly. But the trigger was causing every call to `transferMoney()` to start failing with that error because `UPDATE accounts` statements inside the function were being blocked just like a regular update.
+
+After an extensive search on the PostgreSQL documentation, I checked that I could redefine the function to include a small path in the trigger using a custom configuration parm. The idea is that only "trusted code" (like `transferMoney()`) can explicitly turns on a flag before updating balances. The trigger checks that flag to decide if it will allow the update or not. The new trigger first checks a session setting `database1.allow_balance_update` and only raises issue if that flag is not set to `on`:
+
+```sql
+CREATE OR REPLACE FUNCTION prevent_direct_balance_update()
+RETURNS trigger AS $$
+DECLARE
+    allow_update text;
+BEGIN
+    -- Read our custom flag; returns NULL if not set
+    allow_update := current_setting('database1.allow_balance_update', true);
+
+    -- Only block direct updates when the flag is NOT set to 'on'
+    IF allow_update IS DISTINCT FROM 'on' THEN
+        RAISE EXCEPTION 'Direct balance updates are not allowed. Use transferMoney() instead.';
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_prevent_direct_balance_update ON accounts;
+
+CREATE TRIGGER trg_prevent_direct_balance_update
+BEFORE UPDATE OF balance ON accounts
+FOR EACH ROW
+EXECUTE FUNCTION prevent_direct_balance_update();
+```
+
+`transferMoney()` was also necessary to be updated to when it wraps the balance updates in a section where it sets the flag to on before touching `accounts.balance` and turns it off right after, ensuring that only this code path gets permission to bypass the trigger:
+
+```sql
+PERFORM set_config('database1.allow_balance_update', 'on', true);
+
+####### DO THE UPDATES, THEN SET'S THE FLAG TO OFF AGAIN ########
+
+PERFORM set_config('database1.allow_balance_update', 'off', true);
+```
+
+So we ensure the trigger is still on place, but this time we can run the `transferMoney` function safely. Running the integration test of this new `Transaction Service` in place:
+
+```cpp
+[==========] Running 17 tests from 4 test suites.
+[----------] Global test environment set-up.
+[----------] 8 tests from AccountServiceTest
+[ RUN      ] AccountServiceTest.GetAccount_ReturnsAccountForExistingId
+[       OK ] AccountServiceTest.GetAccount_ReturnsAccountForExistingId (5 ms)
+[ RUN      ] AccountServiceTest.GetAccount_ReturnsNulloptForNonExistingId
+[       OK ] AccountServiceTest.GetAccount_ReturnsNulloptForNonExistingId (0 ms)
+[ RUN      ] AccountServiceTest.AccountExist_ReturnsTrueForExistingAccount
+[       OK ] AccountServiceTest.AccountExist_ReturnsTrueForExistingAccount (0 ms)
+[ RUN      ] AccountServiceTest.AccountExist_ReturnsFalseForNonExistingAccount
+[       OK ] AccountServiceTest.AccountExist_ReturnsFalseForNonExistingAccount (0 ms)
+[ RUN      ] AccountServiceTest.GetBalance_ReturnsBalanceForExistingAccount
+[       OK ] AccountServiceTest.GetBalance_ReturnsBalanceForExistingAccount (0 ms)
+[ RUN      ] AccountServiceTest.GetBalance_ThrowsForNonExistingAccount
+[       OK ] AccountServiceTest.GetBalance_ThrowsForNonExistingAccount (0 ms)
+[ RUN      ] AccountServiceTest.PrintAccount_DoesNotThrowForExistingAccount
+Account ID:   1
+Customer ID:  1
+Customer Name: Alice Johnson
+Customer Email: alice.j@bank1.com
+Type:         checking
+[       OK ] AccountServiceTest.PrintAccount_DoesNotThrowForExistingAccount (0 ms)
+[ RUN      ] AccountServiceTest.PrintAccount_ThrowsForNonExistingAccount
+[       OK ] AccountServiceTest.PrintAccount_ThrowsForNonExistingAccount (0 ms)
+[----------] 8 tests from AccountServiceTest (7 ms total)
+
+[----------] 2 tests from DBConnectionFailureTest
+[ RUN      ] DBConnectionFailureTest.ConnectThrowsOnInvalidCredentials
+tests/test_db_connection.cpp:46: Skipped
+DB already connected, we cannot test invalid credentials.
+
+[  SKIPPED ] DBConnectionFailureTest.ConnectThrowsOnInvalidCredentials (0 ms)
+[ RUN      ] DBConnectionFailureTest.LoadConfigThrowsOnInvalidPath
+[       OK ] DBConnectionFailureTest.LoadConfigThrowsOnInvalidPath (0 ms)
+[----------] 2 tests from DBConnectionFailureTest (0 ms total)
+
+[----------] 3 tests from DBConnectionTest
+[ RUN      ] DBConnectionTest.ConnectsSuccessfully
+[       OK ] DBConnectionTest.ConnectsSuccessfully (0 ms)
+[ RUN      ] DBConnectionTest.CanRunSimpleSelect
+[       OK ] DBConnectionTest.CanRunSimpleSelect (0 ms)
+[ RUN      ] DBConnectionTest.CanFetchSpecificCustomerById
+[       OK ] DBConnectionTest.CanFetchSpecificCustomerById (0 ms)
+[----------] 3 tests from DBConnectionTest (0 ms total)
+
+[----------] 4 tests from TransactionServiceTest
+[ RUN      ] TransactionServiceTest.Transfer_SucceedsForValidAccountsAndAmount
+[       OK ] TransactionServiceTest.Transfer_SucceedsForValidAccountsAndAmount (14 ms)
+[ RUN      ] TransactionServiceTest.Transfer_ThrowsForInsufficientFunds
+[       OK ] TransactionServiceTest.Transfer_ThrowsForInsufficientFunds (3 ms)
+[ RUN      ] TransactionServiceTest.Transfer_ThrowsForNegativeAmount
+[       OK ] TransactionServiceTest.Transfer_ThrowsForNegativeAmount (1 ms)
+[ RUN      ] TransactionServiceTest.Transfer_ThrowsForCurrencyMismatch
+[       OK ] TransactionServiceTest.Transfer_ThrowsForCurrencyMismatch (2 ms)
+[----------] 4 tests from TransactionServiceTest (22 ms total)
+
+[----------] Global test environment tear-down
+[==========] 17 tests from 4 test suites ran. (30 ms total)
+[  PASSED  ] 16 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] DBConnectionFailureTest.ConnectThrowsOnInvalidCredentials
+```
+
+Again, the skipped test is expected. All the tests from `TransactionServiceTest` worked as expected, hence the new function is ready to be deployed on production.
 
 ## Appendix
 
@@ -796,7 +1153,7 @@ Test project /core/tests/sample/build
 Total Test time (real) =   0.02 sec
 ```
 
-The framework is successfully working as expected. Now we can design some unit tests.
+The framework is successfully working as expected. Now we can design some unit tests using our C++ code.
 
 ## References and Tutorials
 
@@ -808,6 +1165,8 @@ All the materials consulted for building up this project include documentations,
 
 - [Basic SQL syntax and other fundamental operations](https://neon.com/postgresql/tutorial)
 
+- [Setting Triggers on PostgreSQL](https://neon.com/postgresql/postgresql-triggers/enable-triggers)
+
 - [`initdb` - Creating a new PostgreSQL database cluster](https://www.postgresql.org/docs/current/app-initdb.html)
 
 - [Stored Procedures](https://www.geeksforgeeks.org/postgresql/postgresql-introduction-to-stored-procedures/)
@@ -815,6 +1174,12 @@ All the materials consulted for building up this project include documentations,
 - [pgTAB - PostgreSQL unit testing framework](https://pgtap.org/documentation.html)
 
 - [SQL Triggers](https://www.datacamp.com/tutorial/sql-triggers)
+
+- [More on PostgreSQL Triggers](https://www.postgresql.org/docs/current/plpgsql-trigger.html)
+
+- [Writing functions for PostgreSQL](https://www.postgresql.org/docs/current/sql-createfunction.html)
+
+- [Disabling a trigger (useful for debbuging)](https://neon.com/postgresql/postgresql-triggers/managing-postgresql-trigger)
 
 **Data Access Layer**
 
@@ -843,3 +1208,7 @@ All the materials consulted for building up this project include documentations,
 - [GoogleTest simple test](https://google.github.io/googletest/primer.html)
 
 - [GoogleTest samples](https://github.com/google/googletest/tree/main/googletest/samples)
+
+- [Statement SQL Parameters `libpqxx`](https://libpqxx.readthedocs.io/stable/parameters.html)
+
+- [Prepared SQL queries for `libpqxx](https://libpqxx.readthedocs.io/stable/prepared.html)

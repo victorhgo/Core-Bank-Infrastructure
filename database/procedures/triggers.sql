@@ -2,22 +2,28 @@
  * protection to our database */
 
 /* Trigger to prevent direct UPDATE of account balances
- * Only transferMoney() procedure is allowed to modify balances. */
+ * Only transferMoney() procedure is allowed to modify balances */
 
 CREATE OR REPLACE FUNCTION prevent_direct_balance_update()
 RETURNS trigger AS $$
+DECLARE
+    allow_update text;
 BEGIN
-    -- Reject if balance changes not using transferMoney
-    IF TG_OP = 'UPDATE' AND OLD.balance <> NEW.balance THEN
-        RAISE EXCEPTION
-            'Direct balance updates are not allowed. Use transferMoney() instead.';
+    -- Read our custom flag; returns NULL if not set
+    allow_update := current_setting('database1.allow_balance_update', true);
+
+    -- Only block direct updates when the flag is NOT set to 'on'
+    IF allow_update IS DISTINCT FROM 'on' THEN
+        RAISE EXCEPTION 'Direct balance updates are not allowed. Use transferMoney() instead.';
     END IF;
 
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE TRIGGER trg_prevent_direct_balance_update
+DROP TRIGGER IF EXISTS trg_prevent_direct_balance_update ON accounts;
+
+CREATE TRIGGER trg_prevent_direct_balance_update
 BEFORE UPDATE OF balance ON accounts
 FOR EACH ROW
 EXECUTE FUNCTION prevent_direct_balance_update();
