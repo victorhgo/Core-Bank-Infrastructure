@@ -7,7 +7,7 @@ using json = nlohmann::json;
 DBConnection& DBConnection::getInstance() {
     /* static var in C++: ensures this var is initialized exactly once:
      * the first time the function is called. All future calls returns the
-     * same instance, ensuring that the application uses only one DB connection.*/
+     * same instance, ensuring that the application uses only one DB connection*/
     static DBConnection instance;
     return instance;
 }

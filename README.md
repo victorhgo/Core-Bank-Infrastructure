@@ -24,6 +24,9 @@ This is an educational project developed with the main goal of providing a pract
         - [Account Service Module](#account-service-module)
         - [Transaction Service Module (transfer money between accounts)](#transaction-service-module-transfer-money-between-accounts)
             - [A small but annoying issue...](#a-small-but-annoying-issue)
+    - [Checkpoint](#checkpoint)
+
+- [Transaction Server](#transaction-server)
 
 - [Appendix](#appendix)
     - [GoogleTest Framework](#appendix-1---googletest-framework)
@@ -1109,6 +1112,94 @@ DB already connected, we cannot test invalid credentials.
 
 Again, the skipped test is expected. All the tests from `TransactionServiceTest` worked as expected, hence the new function is ready to be deployed on production.
 
+### Checkpoint
+
+So far we have successfully deployed a minimal Data Access Layer service, which can connects to the database and perform some basic operations like query account and customer info and perform a simple transaction between accounts. Our current DAL model have the following structure:
+
+```mermaid
+classDiagram
+
+    class DBConnection {
+        getInstance()
+        loadConfig()
+        connect()
+        isConnected()
+        getConnection()
+        createWriteTransaction()
+        createReadTransaction()
+    }
+
+    class Account {
+        accountID
+        customerID
+        customerName
+        accountType
+        balance
+        currency
+    }
+
+    class AccountService {
+        getAccount(accountID)
+        accountExist(accountID)
+        getBalance(accountID)
+        printAccount(accountID)
+    }
+
+    class TransactionService {
+        transfer(fromAccountID, toAccountID, amount, description)
+    }
+
+    AccountService --> DBConnection
+    TransactionService --> DBConnection
+    AccountService <-- Account
+```
+
+So we successfully managed to create a proper core (with stored procedures, triggers, a clean C++ data access layer with tests proving that all of this integration is working as expected). But a real core banking system is not something you run once and exit like we can do now. It must be a service that runs 24/7, accepting requests from many different customers and also performing other tasks such as financial reports. Turning this current core into a long running **transaction server** is our current goal. We need to connect to the database correctly and then guarantee that a stable, concurrent interface that the outside world can interact with is effectively implemented.
+
+## Transaction Server
+
+Before we can start talking about implementing a transaction server and its layout, rules, constraints and methods we first to answer what exactly is a **Transaction Server**.
+
+A transaction server is a long running service (24/7) with the main responsibility of *receiving requests* that change important data (transaction from an ATM for instance) apply those changes safely (thru the rules we've set and using the correct channels to do it) and guarantee that the system’s rules are respected even when a lot of clients are using it at the same time. In other words it can be called as `gatekeeper` for operations that must must either succeed completely or fail completely, never half. In the context of our banking system, this means the transaction server sits between the outside world (ATMs, web apps, mobile apps, batch jobs, admin tools) and the database itself, but these clients don’t talk to the database directly, instead they send commands such as "transfer 50 USD from account 1 to account 2" or "get the balance of account 3" to the transaction server.
+
+The transaction server makes the connection between clients to the data access layer in the following way:
+
+```mermaid
+classDiagram
+direction LR
+    class ClientLayer {
+	    sendRequest()
+	    receiveResponse()
+    }
+    class TransactionServer {
+	    start()
+	    stop()
+	    handleClientConnection()
+	    dispatchCommand(cmd)
+    }
+    class DataAccessLayer {
+	    getInstance()
+	    loadConfig()
+	    connect()
+	    isConnected()
+	    getConnection()
+	    createWriteTransaction()
+	    createReadTransaction()
+	    getBalance(accountId)
+	    transfer(fromId, toId, amount, desc)
+    }
+    class Database {
+	    accounts
+	    customers
+	    transactions
+	    transferMoney
+	    triggers
+    }
+    ClientLayer --> TransactionServer : sends commands (PING, BALANCE, TRANSFER)
+    TransactionServer --> DataAccessLayer : uses for read/write process (BALANCE, TRANSFER)
+    DataAccessLayer --> Database : holds connection, executes SQL and procedures
+```
+
 ## Appendix
 
 ### Appendix 1 - GoogleTest Framework
@@ -1212,3 +1303,4 @@ All the materials consulted for building up this project include documentations,
 - [Statement SQL Parameters `libpqxx`](https://libpqxx.readthedocs.io/stable/parameters.html)
 
 - [Prepared SQL queries for `libpqxx](https://libpqxx.readthedocs.io/stable/prepared.html)
+
