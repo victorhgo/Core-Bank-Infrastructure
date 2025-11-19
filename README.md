@@ -29,7 +29,12 @@ This is an educational project developed with the main goal of providing a pract
 - [Transaction Server](#transaction-server)
 
 - [Appendix](#appendix)
+
     - [GoogleTest Framework](#appendix-1---googletest-framework)
+
+    - [Network Programming](#appendix-2---network-programming)
+
+    - [Concurrency in C++](#appendix-3---concurrency-in-c)
 
 - [References and Tutorials](#references-and-tutorials)
 
@@ -1200,6 +1205,8 @@ direction LR
     DataAccessLayer --> Database : holds connection, executes SQL and procedures
 ```
 
+See the [Appendix 2](#appendix-2---network-programming) for more information about networking programming and also how to deploy a tiny but operational HTML server using TCP sockets.
+
 ## Appendix
 
 ### Appendix 1 - GoogleTest Framework
@@ -1245,6 +1252,114 @@ Total Test time (real) =   0.02 sec
 ```
 
 The framework is successfully working as expected. Now we can design some unit tests using our C++ code.
+
+### Appendix 2 - Network Programming
+
+**On Sockets and a quick Network Fundamentals review**
+
+Basically sockets are a way a program can speak to another program using the *standard UNIX file descriptors*. But what does that really means? Well, everything in UNIX is a file, so when a program performs an Input or Output operation, they do it by reading/writing to a **file descriptor**, which is basic an integer associated with an open file.
+
+So we can use file descriptors to make a program talk to another one thru it. We can call the `socket()` system routine that returns the socket descriptor, and we use methods such as `send()` and `recv()` to communicate with other programs using the socket descriptor.
+
+We are going to use **Stream sockets** because they are a reliable two way connect communication streams. If we send two items from A to B, the files will get to B in the exactly order we've sent them and error free.
+
+Remember that `telnet` uses stream sockets and all the characters we type need to arrive in the same order. Also `HTTP` protocol also uses stream sockets to get pages.
+
+Another important fact is that these sockets uses `TCP` to achieve a high level of data transmission quality.
+
+For more information on Using Internet Sockets, I strongly recommends the [`Beej's Guide to Network Programming`](https://beej.us/guide/bgnet/html/) from Brian "Beej Jorgensen" Hall, which is a free to use and really well written book.
+
+**Building a small HTTP server in C++**
+
+A HTTP server basically *servers* data over a network communication (between programs). For instance, we can have a server running that simply returns the local time, while a running client server, reads the time from the server thru a request.
+
+A server can use TCP/IP socket registered to an IP address on the running platform (a computer, a server, mainframe...) and thru a specific *port*, the socket can listen for network connections (receive or transmit data). These connections are stored in a queue of network threads and then the server processes each one sequentially.
+
+To use the `socket()` system call, the basic syntax for it: [`man socket`](https://man7.org/linux/man-pages/man2/socket.2.html)
+
+```cpp
+#include <sys/socket.h>
+
+int socket(int domain, int type, int protocol);
+```
+
+Let's deploy a demonstration HTTP server in [`/server/demo`](/server/demo/) to practice the concepts from [Beej's Book](https://beej.us/guide/bgnet/html/#socket)
+
+We can start by defining a class Server where we can abstract the methods for a single thread HTTP server using the concepts of socket programming:
+
+```cpp
+/**
+ * @brief This class encapsulates a simple single threaded HTTP server just using
+ * UNIX sockets
+ * 
+ * It listens on the specified port and accepts one connection at a time, reading
+ * the request and returning a fixed HTML response */
+class Server {
+public:
+
+    /**
+     * @brief Construct a new Server object that listen on the given TCP port
+     * 
+     * @param port given TCP port
+     */
+    Server(int port);
+```
+
+This class will have methods to instantiate a server , initializates it using the `init()` method, running the server thru an infinite loop using the `run()` method and handle client requests using the `handleClient()` method. To compile the server, simply runs:
+
+> g++ -std=c++17 main.cpp server.cpp -o http_server
+
+And we can run it by calling it defining the port where it will listen to (default is 8080).
+
+```sh
+$ ./http_server 8080
+
+HTTP server listening on port 8080...
+```
+
+Let's try to make a request on a browser by accessing `http://localhost:8080/`:
+
+```sh
+$ ./http_server 8080
+HTTP server listening on port 8080...
+
+Received request: GET / HTTP/1.1
+Host: localhost:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate, br, zstd
+Connection: keep-alive
+Upgrade-Insecure-Requests: 1
+Sec-Fetch-Dest: document
+Sec-Fetch-Mode: navigate
+Sec-Fetch-Site: none
+Sec-Fetch-User: ?1
+Priority: u=0, i
+
+Received request: GET /favicon.ico HTTP/1.1
+Host: localhost:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0
+Accept: image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate, br, zstd
+Connection: keep-alive
+Referer: http://localhost:8080/
+Sec-Fetch-Dest: image
+Sec-Fetch-Mode: no-cors
+Sec-Fetch-Site: same-origin
+Priority: u=6
+```
+
+On Firefox, the following page is successfully displayed:
+
+![Demo Server Running](/docs/demo_server.png)
+
+Now that we have a tiny HTML running server to demonstrate the concepts of Networking Programming and enabling programs to communicate with each other thru sockets, we can start planning on how the transaction server will look like.
+
+### Appendix 3 - Concurrency in C++
+
+We now have a simple but working HTML server, but its a single threaded server, which means that only one client can make request per time, but for a core bank system, we need to be able to handle multiple requests at once. So to build up a reliable concurrent system, we can explore the concepts of Concurrency.
 
 ## References and Tutorials
 
@@ -1304,3 +1419,14 @@ All the materials consulted for building up this project include documentations,
 
 - [Prepared SQL queries for `libpqxx](https://libpqxx.readthedocs.io/stable/prepared.html)
 
+**Transaction Server**
+
+- [Beej's Guide to Network Programming](https://beej.us/guide/bgnet/html/split/)
+
+- [C++ Concurrency in Action by Anthony Williams](https://www.manning.com/books/c-plus-plus-concurrency-in-action)
+
+- [HTTP: Hypertext Transfer Protocol](https://developer.mozilla.org/en-US/docs/Web/HTTP)
+
+- [TCP (Transmission Control Protocol) specification](https://datatracker.ietf.org/doc/html/rfc793)
+
+- [Building a small HTTP server from scratch](https://osasazamegbe.medium.com/showing-building-an-http-server-from-scratch-in-c-2da7c0db6cb7)
