@@ -2,7 +2,7 @@
 
 by Victor Correa
 
-This is an educational project developed with the main goal of providing a practical environment for learning and applying key concepts related to relational database design such as implementation, maintenance within the context of a simplified banking infrastructure system. Its targeted to be a complete, reproducible study environment where different layers of a financial application can be implemented and tested.
+This is an educational project developed with the main goal of providing a practical environment for learning and applying key concepts related to relational database design such as implementation and maintenance in the context of a simplified banking infrastructure system. Its targeted to be a complete, reproducible study environment where different layers of a financial application can be implemented and tested.
 
 - [Motivation](#motivation)
 
@@ -17,6 +17,7 @@ This is an educational project developed with the main goal of providing a pract
     - [SQL Triggers](#sql-triggers)
 
 - [Data Access Layer](#data-access-layer-dal)
+
     - [Installing and Using `libpqxx`](#installing-and-using-libpqxx)
     - [Database Connection Interface](#database-connection-interface)
         - [db_connection module](#db_connection-module)
@@ -27,6 +28,12 @@ This is an educational project developed with the main goal of providing a pract
     - [Checkpoint](#checkpoint)
 
 - [Transaction Server](#transaction-server)
+
+    - [Concurrency Model](#concurrency-model)
+    - [Transactions](#transactions)
+    - [Starting the Server](#starting-the-server)
+    - [Accessing the Server](#accessing-the-server-via-telnet-protocol)
+    - [Class `Server`](#class-server)
 
 - [Appendix](#appendix)
 
@@ -1207,6 +1214,159 @@ direction LR
 
 See the [Appendix 2](#appendix-2---network-programming) for more information about networking programming and also how to deploy a tiny but operational HTML server using TCP sockets.
 
+### Concurrency Model
+
+To make the server really useful in practice, we need to ensure it can handles multiple clients at the same time, so we can deploy a simple but functional concurrency model that:
+
+1. Creates exactly one **listening socket**
+2. Start an **accept loop** on its own thread
+3. For each new connection, spawns a **worker thread** that handles that client
+4. Each worker thread handles the client needs from its socket.
+
+It will work in the following way:
+
+```cpp
+#import <thread>
+    ...
+running = true;
+acceptThread = std::thread(&Server::acceptLoop, this);
+```
+
+And the `acceptLoop()` will look something like:
+
+```cpp
+std::thread t(&Server::handleClient, this, clientSocket);
+/* Each client is handled on its own thread */
+t.detach();
+```
+
+The accept thread just waits for new connections and for each connection starts a detached `handleClient()` thread, then runs a loop to receive a command line from the customer, parse it using the Services to talk to the db and sends back the response.
+
+This is just a simple concurrency model to demonstrate how it would look like in real life. See the [Appendix 3](#appendix-3---concurrency-in-c) for more information about concurrency model in C++.
+
+### Transactions
+
+An **atomic operation** is an operation guaranteed to execute as a single unified transaction, but what exactly does that mean? When an atomic operation is executed on an object by a specific thread, **no other threads can read or modify the object while the atomic operation is in progress**. This means that other threads will only see the object before or after the operation, in other words there is no intermediary state.
+
+In our project, atomicity are happening in two layers: on the database transaction with methods such as work or `read_transaction`, and there are the operational atomicity that happens in `transfer()` function, that represents a logical operator (Sends money from A to B), it must either work all the way thru, or no work at all, no middle terms are accepted.
+
+RAII (Resource Acquisition Is Initialization) means that when the object is created with a construct, we **acquire** the resource, and when the object goes out of scope (destroying it), we automatically release the resource. No matter if the function completes with an error or not, the destructor will always run.
+
+In the following line for instance:
+
+```cpp
+auto tx = db.createWriteTransaction(); // std::unique_ptr<pqxx::work>
+tx->exec("SELECT transferMoney($1, $2, $3, $4);", params);
+tx->commit();
+```
+
+If everything succeeds, we call the `commit()` method to apply all the changes. But if an error happens before the `commit()`, the function will exit and the destructor will automatically roll back the transaction.
+
+### Starting the Server
+
+Compiling the program with `make`, we can start the server by executing it:
+
+```sh
+$ ./build/bin/server
+[Main] Starting Transaction Server...
+[Main] Using host = 0.0.0.0, port = 8080
+[Main] Connected to database successfully.
+[Server] Listening on port 8080
+[Main] Server running on 0.0.0.0:8080. Press Enter to stop...
+```
+
+With the server running by default on port 8080, we can access it via `telnet` to test the interface.
+
+### Accessing the Server via `telnet` protocol
+
+We can start a session to the running server via telnet by:
+
+```sh
+$ telnet 0.0.0.0 8080
+Trying 0.0.0.0...
+Connected to 0.0.0.0.
+Escape character is '^]'.
+```
+
+With this connection open, we can send commands like:
+
+> PING : Tests if the connection is ok
+> BALANCE account_id : returns the balance from an account ID
+> TRANSFER <fromID> <toID> <amount> <"optional message"> : transfer amount from account fromID to toID with optional message
+
+Getting the balance from account 1 for instance:
+
+```sh
+BALANCE 1
+BALANCE 1 1584.98
+```
+
+On the Server side, the following can be checked:
+
+```sh
+[Server] Received: "BALANCE 1"
+[Server] BALANCE for account 1
+[AccountService] getBalance(1) called
+[AccountService] getAccount(1) start
+[AccountService] getAccount(1) before exec
+[AccountService] getAccount(1) after exec, rows = 1
+[AccountService] getAccount(1) built Account
+[AccountService] getBalance(1) after getAccount
+[AccountService] getBalance(1) returning 1584.98
+[Server] Sent: "BALANCE 1 1584.98
+```
+
+### Class Server 
+
+# TODO - Explain the class and design choices
+
+Let's take a look on the `Server` class:
+
+```cpp
+class Server {
+public:
+    Server(const std::string& host, int port);
+    ~Server();
+
+    void start();
+    void stop();
+
+private:
+    void acceptLoop();
+    void handleClient(int clientSocket);
+
+    std::string hostBind;
+    int         portBind;
+    int         listenSocket = -1;
+
+    std::atomic<bool> running{false};
+    std::thread       acceptThread;
+    std::vector<std::thread> workerThread; // optional, currently unused with detach()
+};
+```
+
+### Testing the Server class
+
+# TODO - Finish up the testing interface and explanation
+
+Results of running tests
+```sh
+[----------] 7 tests from ServerTest (778 ms total)
+[----------] Global test environment tear-down
+[==========] 7 tests from 1 test suite ran. (778 ms total)
+[  PASSED  ] 7 tests.
+```
+
+Integration test result:
+
+```sh
+[----------] Global test environment tear-down
+[==========] 24 tests from 5 test suites ran. (821 ms total)
+[  PASSED  ] 23 tests.
+[  SKIPPED ] 1 test, listed below:
+[  SKIPPED ] DBConnectionFailureTest.ConnectThrowsOnInvalidCredentials
+```
+
 ## Appendix
 
 ### Appendix 1 - GoogleTest Framework
@@ -1359,7 +1519,106 @@ Now that we have a tiny HTML running server to demonstrate the concepts of Netwo
 
 ### Appendix 3 - Concurrency in C++
 
-We now have a simple but working HTML server, but its a single threaded server, which means that only one client can make request per time, but for a core bank system, we need to be able to handle multiple requests at once. So to build up a reliable concurrent system, we can explore the concepts of Concurrency.
+We now have a simple but working HTML server, but its a single threaded server, which means that only one client can make request per time, but for a core bank system, we need to be able to handle multiple requests at once like multiple ATMs, web sessions, mobile apps, batch jobs... They all must be running in parallel. So to build up a reliable concurrent system, we can explore the concepts of Concurrency.
+
+In C++ we can use standard libries such [`thread`](https://cplusplus.com/reference/thread/thread/), [`mutex`](https://en.cppreference.com/w/cpp/thread/mutex.html) and [`atomic`](https://cplusplus.com/reference/atomic/) to work with multiple threads safely. 
+
+Multithreading is a technique where we can divide a program into smaller units of execution. These smaller units are called **threads**. We can start new threads with `std::thread`. This technique helps to improve performance by utilizing multiple CPU cores in an efficient way.
+
+A tiny example on concurrency: suppose program that launches a few threads and each thread increments a global counter some number of times. This program would look like:
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <vector>
+
+int globalCounter = 0;
+
+void incrementManyTimes(int times) {
+    for (int i = 0; i < times; ++i) {
+        // Not thread-safe:
+        globalCounter++;
+    }
+}
+
+int main() {
+    const int numThreads = 4;
+    const int incrementsPerThread = 100000;
+
+    std::vector<std::thread> threads;
+
+    // Start several threads
+    for (int i = 0; i < numThreads; ++i) {
+        threads.emplace_back(incrementManyTimes, incrementsPerThread);
+    }
+
+    // Join all threads
+    for (auto &t : threads) {
+        t.join();
+    }
+
+    std::cout << "Expected: " << numThreads * incrementsPerThread << "\n";
+    std::cout << "Actual:   " << globalCounter << "\n";
+
+    return 0;
+}
+```
+
+Running the above program we get the following results:
+
+```sh
+$ ./test
+Expected: 400000
+Actual:   168632
+```
+
+We can check how inconsistent the Actual result is between runs of this program, this is happening because the `globalCounter` is **not an atomic operation**, it is something like "read value, add one, write back" and when multiple threads do that at the same time the operations are mixing and some increments are lost. This exact kind of bug is what we must avoid in a banking system because we never want "lost updates" when moving money around.
+
+We can fix this issue in a simple way adding a mutex with `std::mutex` and a `std::unique_lock` to **protect the critical session** where we are reading and updating the counter. The main idea behind it is that only one thread can hold the lock at a time, no other thread can enter the protected session while running. So we can implement a mutex on the above program:
+
+```cpp
+...
+#include <mutex>
+
+int globalCounter = 0;
+std::mutex counterMutex;
+
+void incrementManyTimes(int times) {
+    ...
+        std::unique_lock<std::mutex> guard(counterMutex);
+        globalCounter++;
+}
+```
+
+By running this version with the mutex:
+
+```sh
+$ ./test
+Expected: 400000
+Actual:   400000
+```
+
+Now we can see that each increment is protected by the mutex, the `std::unique_lock` is another example of a RAII because the lock is acquired in the constructor and automatically released in the destructor, so we cannot forget to unlock the mutex even if an exception is thrown inside the loop.
+
+In some contexts, we can avoid the mutex by using an **atomic type**, which wraps a value and guarantees that operations like increment are done as a single step in hardware level. We could use something like:
+
+```cpp
+std::atomic<int> globalCounter{0};
+
+void incrementManyTimes(int times){
+    ...
+    globalCounter.fetch_add(1);
+}
+
+int main() {}
+...
+    std::cout << "Expected" ...
+    std::cout << "Actual:   " << globalCounter.load() << "\n";
+```
+
+The above example has the same interface as the mutex one, but here we don’t need any lock. The atomic type ensures that all increments are safe.
+
+For the bank system, each client will be a `std::thread`.
 
 ## References and Tutorials
 

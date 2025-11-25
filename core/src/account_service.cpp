@@ -2,13 +2,14 @@
 #include "database_connection.hpp"
 
 std::optional<Account> AccountService::getAccount(int accountID) {
-    /* Get the instance using DBConnection and store in db */
-    auto& db = DBConnection::getInstance();
+    std::cout << "[AccountService] getAccount(" << accountID << ") start\n";
 
-    /* uses the instance to create the transaction */
+    auto& db = DBConnection::getInstance();
+    auto guard = db.lock();
     auto tx = db.createReadTransaction();
 
-    /* Query account using createReadTransaction() interface */
+    std::cout << "[AccountService] getAccount(" << accountID << ") before exec\n";
+
     pqxx::result res = tx->exec(
         "SELECT a.account_id, a.customer_id, c.full_name AS customer_name,"
         " c.email AS customer_email, a.account_type, a.balance, a.currency "
@@ -16,11 +17,12 @@ std::optional<Account> AccountService::getAccount(int accountID) {
         "WHERE a.account_id = $1", accountID
     );
 
-    /* Commits transaction */
     tx->commit();
 
-    /* Check if nothing returned */
-    if(res.empty()){
+    std::cout << "[AccountService] getAccount(" << accountID << ") after exec, rows = "
+              << res.size() << "\n";
+
+    if (res.empty()) {
         return std::nullopt;
     }
 
@@ -36,24 +38,32 @@ std::optional<Account> AccountService::getAccount(int accountID) {
         row["currency"].as<std::string>()
     };
 
+    std::cout << "[AccountService] getAccount(" << accountID << ") built Account\n";
+
     return acc;
 }
+
 
 bool AccountService::accountExist(int accountID) {
     /* Check if the account exists */
     return getAccount(accountID).has_value();
 }
 
-double AccountService::getBalance(int accountID){
-    /* fetch account using the getAccount method */
-    auto account = getAccount(accountID);
+double AccountService::getBalance(int accountId) {
+    std::cout << "[AccountService] getBalance(" << accountId << ") called\n";
 
-    /* If account not found */
+    auto account = getAccount(accountId);
+
+    std::cout << "[AccountService] getBalance(" << accountId << ") after getAccount\n";
+
     if (!account) {
-        throw std::runtime_error("Account not found: " + std::to_string(accountID));
+        std::cout << "[AccountService] Account " << accountId << " not found\n";
+        throw std::runtime_error("Account not found: " + std::to_string(accountId));
     }
 
-    /* Returns the balance only */
+    std::cout << "[AccountService] getBalance(" << accountId << ") returning "
+              << account->balance << "\n";
+
     return account->balance;
 }
 

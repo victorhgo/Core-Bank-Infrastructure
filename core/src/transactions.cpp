@@ -6,13 +6,24 @@ void TransactionService::transfer(int fromAccountID,
                                   double amount,
                                   const std::string& description) {
     
+
+    std::cout << "[TransactionService] transfer("
+              << fromAccountID << " -> " << toAccountID
+              << ", " << amount << ", \"" << description << "\") start\n";
+
     /* Get the instance using DBConnection and store in db */
     auto& db = DBConnection::getInstance();
-
+    
+    /* guarantees exclusive DB usage in this scope */
+    auto guard = db.lock();
+    
     /* uses the instance to create a write transaction */
     auto tx = db.createWriteTransaction();
 
     try{
+
+        std::cout << "[TransactionService] Calling transferMoney() in DB\n";
+
         pqxx::params parameters;
         parameters.append(fromAccountID);   // $1
         parameters.append(toAccountID);     // $2
@@ -25,13 +36,14 @@ void TransactionService::transfer(int fromAccountID,
             parameters
         );
 
-        // Commit if everything succeeded
+        std::cout << "[TransactionService] transferMoney() executed, committing\n";
+        /* Commits if everything is successfull */
         tx->commit();
+        std::cout << "[TransactionService] transfer() committed successfully\n";
     }
     /* Throws exception for failed transfers */
     catch (const std::exception& e){
-        std::string msg = "Transfer failed: ";
-        msg += e.what();
-        throw std::runtime_error(msg);
+        std::cout << "[TransactionService] transfer() error: " << e.what() << "\n";
+        throw std::runtime_error(std::string("Transfer failed: ") + e.what());
     }
 }

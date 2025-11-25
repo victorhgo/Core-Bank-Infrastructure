@@ -18,11 +18,11 @@ OBJ_DIR := $(BLD_DIR)/objects
 BIN_DIR := $(BLD_DIR)/bin
 TEST_DIR := tests
 
-CORE_SRC := $(SRC_DIR)/db_connection.cpp $(SRC_DIR)/account_service.cpp $(SRC_DIR)/transactions.cpp
+CORE_SRC := $(SRC_DIR)/db_connection.cpp $(SRC_DIR)/account_service.cpp $(SRC_DIR)/transactions.cpp $(SRC_DIR)/server.cpp
 CORE_OBJ := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(CORE_SRC))
 
 # Target executable
-TARGET := $(BIN_DIR)/account_service_demo
+TARGET := $(BIN_DIR)/server
 
 # Source and object files
 SRC := $(wildcard $(SRC_DIR)/*.cpp)
@@ -31,7 +31,7 @@ OBJ := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRC))
 # Test sources/objects/binary
 TEST_SRC := $(wildcard $(TEST_DIR)/*.cpp)
 TEST_OBJ := $(patsubst $(TEST_DIR)/%.cpp,$(OBJ_DIR)/%.test.o,$(TEST_SRC))
-TEST_BIN := $(BIN_DIR)/dal_tests
+TEST_BIN := $(BIN_DIR)/server_tests
 
 # Default target
 all: $(TARGET)

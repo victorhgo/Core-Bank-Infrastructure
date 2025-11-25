@@ -15,7 +15,7 @@ short EXISTING_ACCOUNT_ID = 1;
 int NON_EXISTING_ACCOUNT_ID = 99999;
 
 /**
- * @brief GoogleTest tool for integration tests of the ServiceAccount class.
+ * @brief GoogleTest tool for integration tests of the ServiceAccount class
  *
  * We need to ensure the DB connection is initialized once before each test
  * Tests can safely use DBConnection and AccountService without repeating

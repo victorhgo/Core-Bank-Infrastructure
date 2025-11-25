@@ -2,7 +2,7 @@
  * Of course a test suit should be implemented to validate the class and all functions
  * but for now, this will suffice.
  *
- * This code was adaped from the hello.cpp example provided by the libpqxx */
+ * This code was adapted from the hello.cpp example provided by the libpqxx */
 #include "database_connection.hpp"
 #include "json.hpp"
 

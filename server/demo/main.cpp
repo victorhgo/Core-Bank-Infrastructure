@@ -10,7 +10,7 @@ int main(int argc, char* argv[]){
             port = std::stoi(argv[1]);
         } catch (const std::exception& e) {
             /* if invalid argument is parsed print an error */
-            std::cerr << "Invalid port number: " << argv[1] << "\n";
+            std::cerr << "Invalid port number: " << argv[1] << "\n";;
             return 1;
         }
     }

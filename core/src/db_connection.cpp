@@ -85,3 +85,7 @@ std::unique_ptr<pqxx::read_transaction> DBConnection::createReadTransaction() {
     /* a unique pointer to a newly created pqxx::read_transaction query*/
     return std::make_unique<pqxx::read_transaction>(getConnection());
 }
+
+std::unique_lock<std::mutex> DBConnection::lock() {
+    return std::unique_lock<std::mutex>(dbMutex);
+}
